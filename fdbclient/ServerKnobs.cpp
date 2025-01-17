@@ -40,6 +40,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_VERSION_VECTOR,                               false );
 	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false );
 	init( ENABLE_VERSION_VECTOR_HA_OPTIMIZATION,               false );
+	init( ENABLE_VERSION_VECTOR_REPLY_RECOVERY,                false );
 
 	bool buggifyShortReadWindow = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR;
 	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (buggifyShortReadWindow) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
@@ -381,14 +382,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC,          10.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC = deterministicRandom()->random01() * 10 + 1;
 	init( DD_BULKLOAD_TASK_METADATA_READ_SIZE,                   100 ); if( randomize && BUGGIFY ) DD_BULKLOAD_TASK_METADATA_READ_SIZE = deterministicRandom()->randomInt(2, 100);
 	init( DD_BULKLOAD_PARALLELISM,                                10 ); if( randomize && BUGGIFY ) DD_BULKLOAD_PARALLELISM = deterministicRandom()->randomInt(1, 10);
-	init( DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC,                 2.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC = deterministicRandom()->random01() * 10 + 1;
+	init( DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC,                 5.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC = deterministicRandom()->random01() * 4 + 1;
 
 	// BulkDumping
-	init( DD_BULKDUMP_TASK_METADATA_READ_SIZE,                   100 ); if( randomize && BUGGIFY ) DD_BULKDUMP_TASK_METADATA_READ_SIZE = deterministicRandom()->randomInt(2, 100);
+	init( DD_BULKLOAD_AND_DUMP_TASK_METADATA_READ_SIZE,          100 ); if( randomize && BUGGIFY ) DD_BULKLOAD_AND_DUMP_TASK_METADATA_READ_SIZE = deterministicRandom()->randomInt(2, 100);
 	init( DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC,                 2.0 ); if( randomize && BUGGIFY ) DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC = deterministicRandom()->random01() * 10 + 1;
 	init( DD_BULKDUMP_PARALLELISM,                                50 ); if( randomize && BUGGIFY ) DD_BULKDUMP_PARALLELISM = deterministicRandom()->randomInt(1, 5);
 	init( SS_SERVE_BULKDUMP_PARALLELISM,                           1 ); // TODO(BulkDump): Do not set to 1 after SS can resolve the file folder conflict
-	init( SS_BULKDUMP_BATCH_BYTES,                     100*1024*1024 ); if( randomize && BUGGIFY ) SS_BULKDUMP_BATCH_BYTES = deterministicRandom()->randomInt(100, 50000);
+	init( SS_BULKDUMP_BATCH_BYTES,                     100*1024*1024 ); if( isSimulated ) SS_BULKDUMP_BATCH_BYTES = deterministicRandom()->randomInt(1000, 10000);
 
 	// TeamRemover
 	init( TR_LOW_SPACE_PIVOT_DELAY_SEC,                            0 ); if (isSimulated) TR_LOW_SPACE_PIVOT_DELAY_SEC = deterministicRandom()->randomInt(0, 3);

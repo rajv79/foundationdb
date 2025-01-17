@@ -51,71 +51,8 @@ ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Datab
 	}
 }
 
-void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
-	std::string content = readFileBytes(abspath(fromFile), fileBytesMax);
-	writeFile(abspath(toFile), content);
-	return;
-}
-
-void bulkLoadTransportCP_impl(BulkLoadFileSet fromRemoteFileSet,
-                              BulkLoadFileSet toLocalFileSet,
-                              size_t fileBytesMax,
-                              UID logId) {
-	// Clear existing local folder
-	platform::eraseDirectoryRecursive(abspath(toLocalFileSet.getFolder()));
-	ASSERT(platform::createDirectory(abspath(toLocalFileSet.getFolder())));
-	// Copy data file
-	bulkLoadFileCopy(
-	    abspath(fromRemoteFileSet.getDataFileFullPath()), abspath(toLocalFileSet.getDataFileFullPath()), fileBytesMax);
-	// Copy byte sample file if exists
-	if (fromRemoteFileSet.hasByteSampleFile()) {
-		bulkLoadFileCopy(abspath(fromRemoteFileSet.getBytesSampleFileFullPath()),
-		                 abspath(toLocalFileSet.getBytesSampleFileFullPath()),
-		                 fileBytesMax);
-	}
-	// TODO(BulkLoad): Throw error if the date/bytesample file does not exist while the filename is not empty
-	return;
-}
-
-ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMethod transportMethod,
-                                                          BulkLoadFileSet fromRemoteFileSet,
-                                                          std::string toLocalRoot,
-                                                          UID logId) {
-	ASSERT(transportMethod != BulkLoadTransportMethod::Invalid);
-	loop {
-		try {
-			// Step 1: Generate local file set based on remote file set by replacing the remote root to the local root.
-			state BulkLoadFileSet toLocalFileSet(toLocalRoot,
-			                                     fromRemoteFileSet.getRelativePath(),
-			                                     fromRemoteFileSet.getManifestFileName(),
-			                                     fromRemoteFileSet.getDataFileName(),
-			                                     fromRemoteFileSet.getByteSampleFileName());
-
-			// Step 2: Download remote file set to local folder
-			if (transportMethod == BulkLoadTransportMethod::CP) {
-				ASSERT(fromRemoteFileSet.hasDataFile());
-				// Copy the data file and the sample file from remote folder to a local folder specified by
-				// fromRemoteFileSet.
-				bulkLoadTransportCP_impl(
-				    fromRemoteFileSet, toLocalFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
-			} else {
-				ASSERT(false);
-			}
-			// TODO(BulkLoad): Check file checksum
-
-			return toLocalFileSet;
-
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-			TraceEvent(SevWarn, "SSBulkLoadDownloadTaskFileSetError", logId).errorUnsuppressed(e);
-			wait(delay(5.0));
-		}
-	}
-}
-
 // Return true if generated the byte sampling file. Otherwise, return false.
+// TODO(BulkDump): directly read from special key space.
 ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input file
                                              std::string byteSampleFileFullPath, // output file
                                              UID logId) {
@@ -160,4 +97,173 @@ ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // in
 			deleteFile(abspath(byteSampleFileFullPath));
 		}
 	}
+}
+
+void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
+	std::string content = readFileBytes(abspath(fromFile), fileBytesMax);
+	writeFile(abspath(toFile), content);
+	return;
+}
+
+void bulkLoadTransportCP_impl(BulkLoadFileSet fromRemoteFileSet,
+                              BulkLoadFileSet toLocalFileSet,
+                              size_t fileBytesMax,
+                              UID logId) {
+	// Clear existing local folder
+	platform::eraseDirectoryRecursive(abspath(toLocalFileSet.getFolder()));
+	ASSERT(platform::createDirectory(abspath(toLocalFileSet.getFolder())));
+	// Copy data file
+	bulkLoadFileCopy(
+	    abspath(fromRemoteFileSet.getDataFileFullPath()), abspath(toLocalFileSet.getDataFileFullPath()), fileBytesMax);
+	// Copy byte sample file if exists
+	if (fromRemoteFileSet.hasByteSampleFile()) {
+		bulkLoadFileCopy(abspath(fromRemoteFileSet.getBytesSampleFileFullPath()),
+		                 abspath(toLocalFileSet.getBytesSampleFileFullPath()),
+		                 fileBytesMax);
+	}
+	// TODO(BulkLoad): Throw error if the date/bytesample file does not exist while the filename is not empty
+	return;
+}
+
+ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMethod transportMethod,
+                                                          BulkLoadFileSet fromRemoteFileSet,
+                                                          std::string toLocalRoot,
+                                                          UID logId) {
+	ASSERT(transportMethod != BulkLoadTransportMethod::Invalid);
+	loop {
+		try {
+			// Step 1: Generate local file set based on remote file set by replacing the remote root to the local root.
+			state BulkLoadFileSet toLocalFileSet(toLocalRoot,
+			                                     fromRemoteFileSet.getRelativePath(),
+			                                     fromRemoteFileSet.getManifestFileName(),
+			                                     fromRemoteFileSet.getDataFileName(),
+			                                     fromRemoteFileSet.getByteSampleFileName(),
+			                                     BulkLoadChecksum());
+
+			// Step 2: Download remote file set to local folder
+			if (transportMethod == BulkLoadTransportMethod::CP) {
+				ASSERT(fromRemoteFileSet.hasDataFile());
+				// Copy the data file and the sample file from remote folder to a local folder specified by
+				// fromRemoteFileSet.
+				bulkLoadTransportCP_impl(
+				    fromRemoteFileSet, toLocalFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
+			} else {
+				ASSERT(false);
+			}
+			// TODO(BulkLoad): Check file checksum
+
+			return toLocalFileSet;
+
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			TraceEvent(SevWarn, "SSBulkLoadDownloadTaskFileSetError", logId).errorUnsuppressed(e);
+			wait(delay(5.0));
+		}
+	}
+}
+
+ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
+                                        std::string fromRemotePath,
+                                        std::string toLocalPath,
+                                        UID logId) {
+	state int retryCount = 0;
+	loop {
+		try {
+			if (transportMethod == BulkLoadTransportMethod::CP) {
+				TraceEvent(SevInfo, "DownloadManifestFile", logId)
+				    .detail("FromRemotePath", fromRemotePath)
+				    .detail("ToLocalPath", toLocalPath);
+				bulkLoadFileCopy(abspath(fromRemotePath), abspath(toLocalPath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
+				wait(delay(0.1));
+			} else {
+				TraceEvent(SevError, "DownloadManifestFileError", logId)
+				    .detail("Reason", "Transport method is not implemented")
+				    .detail("TransportMethod", transportMethod)
+				    .detail("FromRemotePath", fromRemotePath)
+				    .detail("ToLocalPath", toLocalPath);
+				UNREACHABLE();
+			}
+			if (!fileExists(abspath(toLocalPath))) {
+				throw retry();
+			}
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			retryCount++;
+			if (retryCount > 10) {
+				TraceEvent(SevWarnAlways, "DownloadManifestFileError", logId)
+				    .errorUnsuppressed(e)
+				    .detail("TransportMethod", transportMethod)
+				    .detail("FromRemotePath", fromRemotePath)
+				    .detail("ToLocalPath", toLocalPath);
+				throw e;
+			}
+			wait(delay(5.0));
+		}
+	}
+	return Void();
+}
+
+// Download job manifest file
+// Each job has one manifest file including manifest paths of all tasks
+ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod transportMethod,
+                                                   std::string localJobManifestFilePath,
+                                                   std::string remoteJobManifestFilePath,
+                                                   UID logId) {
+	wait(downloadManifestFile(transportMethod, remoteJobManifestFilePath, localJobManifestFilePath, logId));
+	return Void();
+}
+
+// Get manifest within the input range
+ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>>
+getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRange range, UID logId) {
+	ASSERT(fileExists(abspath(localJobManifestFilePath)));
+	state std::unordered_map<Key, BulkLoadJobFileManifestEntry> res;
+	const std::string jobManifestRawString =
+	    readFileBytes(abspath(localJobManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
+	state std::vector<std::string> lines = splitString(jobManifestRawString, "\n");
+	state BulkLoadJobManifestFileHeader header(lines[0]);
+	state size_t lineIdx = 1; // skip the first line which is the header
+	while (lineIdx < lines.size()) {
+		if (lines[lineIdx].empty()) {
+			ASSERT(lineIdx == lines.size() - 1);
+			break;
+		}
+		BulkLoadJobFileManifestEntry manifestEntry(lines[lineIdx]);
+		KeyRange overlappingRange = range & manifestEntry.getRange();
+		if (overlappingRange.empty()) {
+			// Ignore the manifest entry if no overlapping range
+			lineIdx = lineIdx + 1;
+			// Here we do not do break here because we always scan the entire file assuming the manifest entry is not
+			// sorted by beginKey in the file.
+			continue;
+		}
+		auto returnV = res.insert({ manifestEntry.getBeginKey(), manifestEntry });
+		ASSERT(returnV.second);
+		if (lineIdx % 1000 == 0) {
+			wait(delay(0.1)); // yield per batch
+		}
+		lineIdx = lineIdx + 1;
+	}
+	return res;
+}
+
+ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobFileManifestEntry manifestEntry,
+                                                                    std::string manifestLocalTempFolder,
+                                                                    BulkLoadTransportMethod transportMethod,
+                                                                    std::string jobRoot,
+                                                                    UID logId) {
+	state std::string remoteManifestFilePath = joinPath(jobRoot, manifestEntry.getManifestRelativePath());
+	state std::string localManifestFilePath =
+	    joinPath(manifestLocalTempFolder,
+	             deterministicRandom()->randomUniqueID().toString() + "-" + basename(remoteManifestFilePath));
+	wait(downloadManifestFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId));
+	const std::string manifestRawString =
+	    readFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
+	ASSERT(!manifestRawString.empty());
+	return BulkLoadManifest(manifestRawString);
 }

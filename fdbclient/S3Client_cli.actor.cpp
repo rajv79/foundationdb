@@ -111,18 +111,18 @@ static void printUsage(std::string const& programName) {
 	             "                 Has no effect unless --log is specified.\n"
 	             "  --blob-credentials FILE\n"
 	             "                 File containing blob credentials in JSON format.\n"
-	             "                 The same credential format/file fdbbackup uses.\n" TLS_HELP
+	             "                 The same credential format/file fdbbackup uses.\n"
+	             "                 See 'Blob Credential Files' in https://apple.github.io/foundationdb/backups.html.\n"
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --knob-KNOBNAME KNOBVALUE\n"
 	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
 	             "EXAMPLES:\n"
 	             " "
 	          << programName
-	          << " --blob-credentials /path/to/credentials.json cp /path/to/source /path/to/target\n"
-	             " "
-	          << programName
-	          << " --knob_http_verbose_level=10 --log  "
-	             "cp 'blobstore://localhost:8333/x?bucket=backup&region=us&secure_connection=0' dir3\n";
+	          << " --knob_http_verbose_level=10 --tls-ca-file /etc/ssl/cert.pem \\\n"
+	             " --blob-credentials /tmp/s3.6GWo/blob_credentials.json --log --logdir /tmp/s3.6GWo/logs cp \\\n"
+	             " 'blobstore://@backup-us-west-2.s3.amazonaws.com/dir/x.txt?bucket=backup-us-west-2&region=us-west-2' "
+	             "/tmp/x.txt\n";
 	return;
 }
 
@@ -140,7 +140,7 @@ struct Params : public ReferenceCounted<Params> {
 	std::string tgt;
 	std::string command;
 	int whichIsBlobstoreURL = -1;
-	const std::string blobstore_enable_etag_on_get = "blobstore_enable_etag_on_get";
+	const std::string blobstore_enable_object_integrity_check = "blobstore_enable_object_integrity_check";
 
 	std::string toString() {
 		std::string s;
@@ -168,16 +168,16 @@ struct Params : public ReferenceCounted<Params> {
 	}
 
 	void updateKnobs() {
-		// Set default to 'true' for blobstore_enable_etag_on_get if not explicitly set
-		bool blobstore_enable_etag_on_get_set = false;
-		for (const auto& [knob, value] : knobs) {
-			if (knob == blobstore_enable_etag_on_get) {
-				blobstore_enable_etag_on_get_set = true;
+		// Set default to 'true' for blobstore_enable_object_integrity_check if not explicitly set
+		bool blobstore_enable_object_integrity_check_set = false;
+		for (const std::pair p : knobs) {
+			if (p.first == blobstore_enable_object_integrity_check) {
+				blobstore_enable_object_integrity_check_set = true;
 				break;
 			}
 		}
-		if (!blobstore_enable_etag_on_get_set) {
-			knobs.push_back(std::pair(blobstore_enable_etag_on_get, "true"));
+		if (!blobstore_enable_object_integrity_check_set) {
+			knobs.push_back(std::pair(blobstore_enable_object_integrity_check, "true"));
 		}
 		IKnobCollection::setupKnobs(knobs);
 
@@ -198,7 +198,6 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 			break;
 
 		default:
-			std::cerr << "ERROR: argument given for option: " << args->OptionText() << "\n";
 			return FDB_EXIT_ERROR;
 			break;
 		}
@@ -389,6 +388,9 @@ int main(int argc, char** argv) {
 		param->tlsConfig.setupBlobCredentials();
 		auto f = stopAfter(run(param));
 		runNetwork();
+		if (f.isValid() && f.isReady() && !f.isError() && !f.get().present()) {
+			status = FDB_EXIT_ERROR;
+		}
 	} catch (Error& e) {
 		std::cerr << "ERROR: " << e.what() << "\n";
 		return FDB_EXIT_ERROR;

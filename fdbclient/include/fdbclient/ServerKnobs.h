@@ -41,6 +41,7 @@ public:
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 	bool ENABLE_VERSION_VECTOR;
 	bool ENABLE_VERSION_VECTOR_TLOG_UNICAST;
+	bool ENABLE_VERSION_VECTOR_REPLY_RECOVERY;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
 	double MAX_VERSION_RATE_MODIFIER;
@@ -402,7 +403,7 @@ public:
 	int DD_BULKLOAD_PARALLELISM; // the maximum number of running bulk load tasks
 	double DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk load scheduler has to wait
 	                                              // between two rounds
-	int DD_BULKDUMP_TASK_METADATA_READ_SIZE; // the number of bulk dump tasks read from metadata at a time
+	int DD_BULKLOAD_AND_DUMP_TASK_METADATA_READ_SIZE; // the number of bulk dump tasks read from metadata at a time
 	double DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk dump scheduler has to wait
 	                                              // between two rounds
 	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD
@@ -776,8 +777,9 @@ public:
 	double CC_TRACKING_HEALTH_RECOVERY_INTERVAL; // The number of recovery count should not exceed
 	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
 	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
-	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number of recoveries can be triggered due to worker health within
-	                                  // CC_TRACKING_HEALTH_RECOVERY_INTERVAL
+	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number recoveries that can be triggered due to worker
+	                                  // health within CC_TRACKING_HEALTH_RECOVERY_INTERVAL. This count accounts for any
+	                                  // recovery trigger including non-gray failure ones.
 	bool CC_HEALTH_TRIGGER_FAILOVER; // Whether to enable health triggered failover in CC.
 	int CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION; // The minimum number of degraded servers that can trigger a
 	                                               // failover.
